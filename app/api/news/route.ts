@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 const FEEDS = [
-  { source: 'nikkei',    url: 'https://www.nikkei.com/rss/index.rss' },
+  { source: 'nikkei',    url: 'https://www3.nhk.or.jp/rss/news/cat0.xml' },
   { source: 'wsj',       url: 'https://feeds.a.dj.com/rss/RSSWorldNews.xml' },
   { source: 'economist', url: 'https://www.economist.com/finance-and-economics/rss.xml' },
 ] as const;

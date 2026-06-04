@@ -17,11 +17,10 @@ type Task = { id: string; text: string; done: boolean; category: TaskCategory };
 type ReminderCategory = 'business' | 'health' | 'life' | 'payment' | 'travel';
 type Reminder = { id: string; title: string; datetime: string; category: ReminderCategory };
 
-type NotionPage = { id: string; title: string; url: string };
-type NewsItem   = { title: string; link: string };
-type NewsTab    = 'nikkei' | 'wsj' | 'economist';
+type NewsItem = { title: string; link: string };
+type NewsTab  = 'nikkei' | 'wsj' | 'economist';
 
-type NavSection = 'calendar' | 'tasks' | 'reminders' | 'notion' | 'news';
+type NavSection = 'calendar' | 'tasks' | 'reminders' | 'news';
 
 // ── Color tokens ───────────────────────────────────────────────────────────────
 const BG      = '#0d0d0d';
@@ -44,8 +43,8 @@ const REM_COLORS: Record<ReminderCategory, string> = { business: '#6366f1', heal
 const WEEK_LABELS = ['月', '火', '水', '木', '金', '土', '日'];
 
 const NEWS_TAB_LABELS: Record<NewsTab, string> = {
-  nikkei: '日経',
-  wsj: 'WSJ',
+  nikkei:    'NHK',
+  wsj:       'WSJ',
   economist: 'Economist',
 };
 
@@ -190,11 +189,6 @@ export default function DashboardPage() {
   const [remSending, setRemSending]   = useState(false);
   const [remSent, setRemSent]         = useState(false);
 
-  // Notion
-  const [notionPages, setNotionPages]     = useState<NotionPage[]>([]);
-  const [notionLoading, setNotionLoading] = useState(true);
-  const [notionError, setNotionError]     = useState<string | null>(null);
-
   // News
   const [newsData, setNewsData]       = useState<Record<string, NewsItem[]>>({});
   const [newsTab, setNewsTab]         = useState<NewsTab>('nikkei');
@@ -204,7 +198,6 @@ export default function DashboardPage() {
   const calRef    = useRef<HTMLDivElement>(null);
   const taskRef   = useRef<HTMLDivElement>(null);
   const remRef    = useRef<HTMLDivElement>(null);
-  const notionRef = useRef<HTMLDivElement>(null);
   const newsRef   = useRef<HTMLDivElement>(null);
   const loadedRef = useRef(false);
 
@@ -256,18 +249,6 @@ export default function DashboardPage() {
       .finally(() => setCalLoading(false));
   }, []);
 
-  // Fetch Notion pages
-  useEffect(() => {
-    fetch('/api/notion')
-      .then(r => r.json())
-      .then(data => {
-        if (data.error) throw new Error(data.error);
-        setNotionPages(data.pages ?? []);
-      })
-      .catch((e: Error) => setNotionError(e.message))
-      .finally(() => setNotionLoading(false));
-  }, []);
-
   // Fetch News
   useEffect(() => {
     fetch('/api/news')
@@ -286,7 +267,6 @@ export default function DashboardPage() {
       calendar:  calRef,
       tasks:     taskRef,
       reminders: remRef,
-      notion:    notionRef,
       news:      newsRef,
     };
     refMap[section].current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -358,7 +338,6 @@ export default function DashboardPage() {
     { key: 'calendar',  icon: '📅', label: 'カレンダー' },
     { key: 'tasks',     icon: '✅', label: 'タスク' },
     { key: 'reminders', icon: '🔔', label: 'リマインダー' },
-    { key: 'notion',    icon: '📓', label: 'Notion' },
     { key: 'news',      icon: '📰', label: 'ニュース' },
   ];
 
@@ -417,12 +396,6 @@ export default function DashboardPage() {
               🔔 リマインダー&nbsp;
               <span style={{ color: TEXT, fontWeight: 600 }}>{reminders.length}</span> 件
             </div>
-            <div style={{ fontSize: '0.67rem', color: MUTED }}>
-              📓 Notion&nbsp;
-              <span style={{ color: notionLoading ? MUTED : TEXT, fontWeight: 600 }}>
-                {notionLoading ? '…' : notionPages.length}
-              </span> ページ
-            </div>
           </div>
         </div>
 
@@ -460,7 +433,6 @@ export default function DashboardPage() {
         <div ref={calRef} style={{ marginBottom: '3rem', scrollMarginTop: '1rem' }}>
           <SectionHeader icon="📅" title="Googleカレンダー" sub="今日と今週の予定を確認" />
 
-          {/* Today's events */}
           <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <div style={{ fontSize: '0.85rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -484,7 +456,6 @@ export default function DashboardPage() {
             {todayEvents.map(e => <EventRow key={e.id} event={e} />)}
           </div>
 
-          {/* Week view */}
           <div style={{ ...cardStyle, marginTop: '1rem' }}>
             <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.85rem' }}>今週の予定</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '0.4rem' }}>
@@ -526,7 +497,6 @@ export default function DashboardPage() {
           <SectionHeader icon="✅" title="タスクリスト" sub="日々のタスクをチェックリストで管理" />
           <div style={cardStyle}>
 
-            {/* Add form */}
             <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.85rem', flexWrap: 'wrap' }}>
               <input
                 value={newTaskText}
@@ -545,7 +515,6 @@ export default function DashboardPage() {
               <button onClick={addTask} style={btnStyle(ACCENT, false)}>追加</button>
             </div>
 
-            {/* Category filter */}
             <div style={{ display: 'flex', gap: '0.35rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
               {(['all', ...TASK_CATS] as Array<'all' | TaskCategory>).map(c => (
                 <button
@@ -564,7 +533,6 @@ export default function DashboardPage() {
               ))}
             </div>
 
-            {/* Task list */}
             {filteredTasks.length === 0 && <Empty msg="タスクがありません" />}
             {filteredTasks.map(t => (
               <div key={t.id} style={{
@@ -613,7 +581,6 @@ export default function DashboardPage() {
           <SectionHeader icon="🔔" title="リマインダー" sub="Gmailでメール通知するリマインダーを管理" />
           <div style={cardStyle}>
 
-            {/* Add form */}
             <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
               <input
                 value={remTitle}
@@ -637,7 +604,6 @@ export default function DashboardPage() {
               <button onClick={addReminder} style={btnStyle(ACCENT, false)}>登録</button>
             </div>
 
-            {/* Reminder list */}
             {reminders.length === 0 && <Empty msg="リマインダーがありません" />}
             {reminders
               .slice()
@@ -682,68 +648,11 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* ── Notion ───────────────────────────────────────────────────── */}
-        <div ref={notionRef} style={{ marginBottom: '3rem', scrollMarginTop: '1rem' }}>
-          <SectionHeader icon="📓" title="Notionページ" sub="最近更新したページ一覧（クリックで Notion を開く）" />
-          <div style={cardStyle}>
-            {notionLoading && (
-              <p style={{ color: MUTED, fontSize: '0.82rem', margin: 0 }}>読み込み中...</p>
-            )}
-            {notionError && (
-              <p style={{ color: '#ef4444', fontSize: '0.82rem', margin: 0 }}>
-                ⚠ {notionError}
-                {notionError.includes('NOTION_TOKEN') && (
-                  <span style={{ color: MUTED }}> — .env.local に NOTION_TOKEN を追加してください。</span>
-                )}
-              </p>
-            )}
-            {!notionLoading && !notionError && notionPages.length === 0 && (
-              <Empty msg="ページが見つかりません" />
-            )}
-            {notionPages.map((page, i) => (
-              <div
-                key={page.id}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '0.75rem',
-                  padding: '0.6rem 0',
-                  borderBottom: i < notionPages.length - 1 ? `1px solid ${BORDER}` : 'none',
-                }}
-              >
-                <span style={{ fontSize: '0.78rem', color: MUTED, fontVariantNumeric: 'tabular-nums', flexShrink: 0, minWidth: 20 }}>
-                  {i + 1}
-                </span>
-                <a
-                  href={page.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    flex: 1, color: '#a5b4fc', textDecoration: 'none',
-                    fontSize: '0.875rem', fontWeight: 500,
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.color = '#818cf8'; }}
-                  onMouseLeave={e => { e.currentTarget.style.color = '#a5b4fc'; }}
-                >
-                  📄 {page.title}
-                </a>
-                <span style={{
-                  fontSize: '0.65rem', color: MUTED,
-                  padding: '1px 6px', border: `1px solid ${BORDER}`, borderRadius: 4,
-                  flexShrink: 0,
-                }}>
-                  ↗
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
         {/* ── News ─────────────────────────────────────────────────────── */}
         <div ref={newsRef} style={{ marginBottom: '3rem', scrollMarginTop: '1rem' }}>
-          <SectionHeader icon="📰" title="ニュース" sub="日経・WSJ・Economistの最新ヘッドライン" />
+          <SectionHeader icon="📰" title="ニュース" sub="NHK・WSJ・Economistの最新ヘッドライン" />
           <div style={cardStyle}>
 
-            {/* Tabs */}
             <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '1.1rem', borderBottom: `1px solid ${BORDER}`, paddingBottom: '0.75rem' }}>
               {(['nikkei', 'wsj', 'economist'] as NewsTab[]).map(tab => (
                 <button

@@ -17,7 +17,11 @@ type Task = { id: string; text: string; done: boolean; category: TaskCategory };
 type ReminderCategory = 'business' | 'health' | 'life' | 'payment' | 'travel';
 type Reminder = { id: string; title: string; datetime: string; category: ReminderCategory };
 
-type NavSection = 'calendar' | 'tasks' | 'reminders';
+type NotionPage = { id: string; title: string; url: string };
+type NewsItem   = { title: string; link: string };
+type NewsTab    = 'nikkei' | 'wsj' | 'economist';
+
+type NavSection = 'calendar' | 'tasks' | 'reminders' | 'notion' | 'news';
 
 // ── Color tokens ───────────────────────────────────────────────────────────────
 const BG      = '#0d0d0d';
@@ -38,6 +42,12 @@ const REM_LABELS: Record<ReminderCategory, string> = { business: 'ビジネス',
 const REM_COLORS: Record<ReminderCategory, string> = { business: '#6366f1', health: '#10b981', life: '#8b5cf6', payment: '#ef4444', travel: '#06b6d4' };
 
 const WEEK_LABELS = ['月', '火', '水', '木', '金', '土', '日'];
+
+const NEWS_TAB_LABELS: Record<NewsTab, string> = {
+  nikkei: '日経',
+  wsj: 'WSJ',
+  economist: 'Economist',
+};
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 function uid(): string {
@@ -180,9 +190,22 @@ export default function DashboardPage() {
   const [remSending, setRemSending]   = useState(false);
   const [remSent, setRemSent]         = useState(false);
 
+  // Notion
+  const [notionPages, setNotionPages]     = useState<NotionPage[]>([]);
+  const [notionLoading, setNotionLoading] = useState(true);
+  const [notionError, setNotionError]     = useState<string | null>(null);
+
+  // News
+  const [newsData, setNewsData]       = useState<Record<string, NewsItem[]>>({});
+  const [newsTab, setNewsTab]         = useState<NewsTab>('nikkei');
+  const [newsLoading, setNewsLoading] = useState(true);
+  const [newsErrors, setNewsErrors]   = useState<string[]>([]);
+
   const calRef    = useRef<HTMLDivElement>(null);
   const taskRef   = useRef<HTMLDivElement>(null);
   const remRef    = useRef<HTMLDivElement>(null);
+  const notionRef = useRef<HTMLDivElement>(null);
+  const newsRef   = useRef<HTMLDivElement>(null);
   const loadedRef = useRef(false);
 
   // Clock
@@ -233,10 +256,40 @@ export default function DashboardPage() {
       .finally(() => setCalLoading(false));
   }, []);
 
+  // Fetch Notion pages
+  useEffect(() => {
+    fetch('/api/notion')
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) throw new Error(data.error);
+        setNotionPages(data.pages ?? []);
+      })
+      .catch((e: Error) => setNotionError(e.message))
+      .finally(() => setNotionLoading(false));
+  }, []);
+
+  // Fetch News
+  useEffect(() => {
+    fetch('/api/news')
+      .then(r => r.json())
+      .then(data => {
+        setNewsData(data.results ?? {});
+        if (data.errors) setNewsErrors(data.errors);
+      })
+      .catch((e: Error) => setNewsErrors([e.message]))
+      .finally(() => setNewsLoading(false));
+  }, []);
+
   function navTo(section: NavSection) {
     setActiveNav(section);
-    const ref = section === 'calendar' ? calRef : section === 'tasks' ? taskRef : remRef;
-    ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const refMap: Record<NavSection, React.RefObject<HTMLDivElement>> = {
+      calendar:  calRef,
+      tasks:     taskRef,
+      reminders: remRef,
+      notion:    notionRef,
+      news:      newsRef,
+    };
+    refMap[section].current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   function addTask() {
@@ -305,7 +358,11 @@ export default function DashboardPage() {
     { key: 'calendar',  icon: '📅', label: 'カレンダー' },
     { key: 'tasks',     icon: '✅', label: 'タスク' },
     { key: 'reminders', icon: '🔔', label: 'リマインダー' },
+    { key: 'notion',    icon: '📓', label: 'Notion' },
+    { key: 'news',      icon: '📰', label: 'ニュース' },
   ];
+
+  const currentNews: NewsItem[] = newsData[newsTab] ?? [];
 
   return (
     <div style={{
@@ -359,6 +416,12 @@ export default function DashboardPage() {
             <div style={{ fontSize: '0.67rem', color: MUTED }}>
               🔔 リマインダー&nbsp;
               <span style={{ color: TEXT, fontWeight: 600 }}>{reminders.length}</span> 件
+            </div>
+            <div style={{ fontSize: '0.67rem', color: MUTED }}>
+              📓 Notion&nbsp;
+              <span style={{ color: notionLoading ? MUTED : TEXT, fontWeight: 600 }}>
+                {notionLoading ? '…' : notionPages.length}
+              </span> ページ
             </div>
           </div>
         </div>
@@ -616,6 +679,134 @@ export default function DashboardPage() {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+
+        {/* ── Notion ───────────────────────────────────────────────────── */}
+        <div ref={notionRef} style={{ marginBottom: '3rem', scrollMarginTop: '1rem' }}>
+          <SectionHeader icon="📓" title="Notionページ" sub="最近更新したページ一覧（クリックで Notion を開く）" />
+          <div style={cardStyle}>
+            {notionLoading && (
+              <p style={{ color: MUTED, fontSize: '0.82rem', margin: 0 }}>読み込み中...</p>
+            )}
+            {notionError && (
+              <p style={{ color: '#ef4444', fontSize: '0.82rem', margin: 0 }}>
+                ⚠ {notionError}
+                {notionError.includes('NOTION_TOKEN') && (
+                  <span style={{ color: MUTED }}> — .env.local に NOTION_TOKEN を追加してください。</span>
+                )}
+              </p>
+            )}
+            {!notionLoading && !notionError && notionPages.length === 0 && (
+              <Empty msg="ページが見つかりません" />
+            )}
+            {notionPages.map((page, i) => (
+              <div
+                key={page.id}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '0.75rem',
+                  padding: '0.6rem 0',
+                  borderBottom: i < notionPages.length - 1 ? `1px solid ${BORDER}` : 'none',
+                }}
+              >
+                <span style={{ fontSize: '0.78rem', color: MUTED, fontVariantNumeric: 'tabular-nums', flexShrink: 0, minWidth: 20 }}>
+                  {i + 1}
+                </span>
+                <a
+                  href={page.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    flex: 1, color: '#a5b4fc', textDecoration: 'none',
+                    fontSize: '0.875rem', fontWeight: 500,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.color = '#818cf8'; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = '#a5b4fc'; }}
+                >
+                  📄 {page.title}
+                </a>
+                <span style={{
+                  fontSize: '0.65rem', color: MUTED,
+                  padding: '1px 6px', border: `1px solid ${BORDER}`, borderRadius: 4,
+                  flexShrink: 0,
+                }}>
+                  ↗
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ── News ─────────────────────────────────────────────────────── */}
+        <div ref={newsRef} style={{ marginBottom: '3rem', scrollMarginTop: '1rem' }}>
+          <SectionHeader icon="📰" title="ニュース" sub="日経・WSJ・Economistの最新ヘッドライン" />
+          <div style={cardStyle}>
+
+            {/* Tabs */}
+            <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '1.1rem', borderBottom: `1px solid ${BORDER}`, paddingBottom: '0.75rem' }}>
+              {(['nikkei', 'wsj', 'economist'] as NewsTab[]).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setNewsTab(tab)}
+                  style={{
+                    padding: '4px 16px', borderRadius: 20, fontSize: '0.75rem',
+                    cursor: 'pointer', fontFamily: 'inherit',
+                    border: `1px solid ${newsTab === tab ? ACCENT : BORDER}`,
+                    background: newsTab === tab ? ACCENT + '20' : 'transparent',
+                    color: newsTab === tab ? '#818cf8' : MUTED,
+                    fontWeight: newsTab === tab ? 600 : 400,
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  {NEWS_TAB_LABELS[tab]}
+                </button>
+              ))}
+            </div>
+
+            {newsLoading && (
+              <p style={{ color: MUTED, fontSize: '0.82rem', margin: 0 }}>読み込み中...</p>
+            )}
+            {!newsLoading && newsErrors.length > 0 && (
+              <p style={{ color: '#f59e0b', fontSize: '0.75rem', margin: '0 0 0.75rem' }}>
+                ⚠ 一部フィードの取得に失敗しました
+              </p>
+            )}
+            {!newsLoading && currentNews.length === 0 && (
+              <Empty msg="記事を取得できませんでした" />
+            )}
+            {currentNews.map((item, i) => (
+              <div
+                key={i}
+                style={{
+                  padding: '0.65rem 0',
+                  borderBottom: i < currentNews.length - 1 ? `1px solid ${BORDER}` : 'none',
+                  display: 'flex', alignItems: 'flex-start', gap: '0.75rem',
+                }}
+              >
+                <span style={{
+                  flexShrink: 0, marginTop: 2,
+                  fontSize: '0.65rem', color: MUTED,
+                  fontVariantNumeric: 'tabular-nums', minWidth: 16,
+                }}>
+                  {i + 1}
+                </span>
+                <a
+                  href={item.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    flex: 1, color: TEXT, textDecoration: 'none',
+                    fontSize: '0.875rem', lineHeight: 1.55,
+                    transition: 'color 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.color = '#818cf8'; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = TEXT; }}
+                >
+                  {item.title}
+                </a>
+              </div>
+            ))}
           </div>
         </div>
 

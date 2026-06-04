@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getGmailClient } from '@/lib/google';
 
 // ── Wisdom database ────────────────────────────────────────────────────────────
@@ -365,7 +365,13 @@ function buildRawHtmlEmail(to: string, subject: string, html: string): string {
 }
 
 // ── Route handler ────────────────────────────────────────────────────────────
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const cronSecret = process.env.CRON_SECRET;
+  const authHeader = req.headers.get('authorization');
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const to = process.env.REMINDER_TO_EMAIL ?? '';
   if (!to) {
     return NextResponse.json({ error: 'REMINDER_TO_EMAIL not set' }, { status: 500 });

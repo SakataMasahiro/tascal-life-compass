@@ -18,20 +18,15 @@ function decodeEntities(s: string): string {
     .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
 }
 
+function stripCdata(s: string): string {
+  return s.replace(/^<!\[CDATA\[([\s\S]*?)\]\]>$/, '$1').trim();
+}
+
 function extractTag(block: string, tag: string): string {
-  // CDATA variant
-  const cdataRe = new RegExp(
-    `<${tag}[^>]*><!\\[CDATA\\[([\\s\\S]*?)\\]\\]><\\/${tag}>`, 'i',
-  );
-  const cdata = block.match(cdataRe);
-  if (cdata) return decodeEntities(cdata[1].trim());
-
-  // Plain variant
   const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i');
-  const plain = block.match(re);
-  if (plain) return decodeEntities(plain[1].trim());
-
-  return '';
+  const m = block.match(re);
+  if (!m) return '';
+  return decodeEntities(stripCdata(m[1].trim()));
 }
 
 function extractLink(block: string): string {

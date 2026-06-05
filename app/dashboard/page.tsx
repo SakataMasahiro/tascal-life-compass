@@ -3,12 +3,15 @@
 import { useEffect, useState, useRef, KeyboardEvent } from 'react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
+type CalEventCategory = 'work' | 'personal' | 'health';
 type CalEvent = {
   id: string;
   summary: string;
   start: string;
   end: string;
   location: string | null;
+  description: string | null;
+  category: CalEventCategory;
 };
 
 type TaskCategory = 'work' | 'personal' | 'health' | 'other';
@@ -36,6 +39,29 @@ const TASK_CATS: TaskCategory[] = ['work', 'personal', 'health', 'other'];
 const TASK_LABELS: Record<TaskCategory, string> = { work: '仕事', personal: '個人', health: '健康', other: 'その他' };
 const TASK_COLORS: Record<TaskCategory, string> = { work: '#6366f1', personal: '#ec4899', health: '#10b981', other: '#f59e0b' };
 
+const CAL_CAT_LABELS: Record<CalEventCategory, string> = { work: '仕事', personal: '個人', health: '健康' };
+
+const BADGE_BASE = 'inline-flex items-center text-[0.65rem] px-2 py-0.5 rounded-full border whitespace-nowrap shrink-0 font-medium leading-none';
+
+const CAL_CAT_BADGE: Record<CalEventCategory, string> = {
+  work:     'bg-amber-50 text-amber-800 border-amber-200',
+  personal: 'bg-sky-50 text-sky-800 border-sky-200',
+  health:   'bg-emerald-50 text-emerald-800 border-emerald-200',
+};
+
+const TASK_CAT_BADGE: Record<TaskCategory, string> = {
+  work:     'bg-amber-50 text-amber-800 border-amber-200',
+  personal: 'bg-sky-50 text-sky-800 border-sky-200',
+  health:   'bg-emerald-50 text-emerald-800 border-emerald-200',
+  other:    'bg-stone-100 text-stone-600 border-stone-200',
+};
+
+const WEEK_CHIP: Record<CalEventCategory, string> = {
+  work:     'bg-amber-900/50 text-amber-200',
+  personal: 'bg-sky-900/50 text-sky-200',
+  health:   'bg-emerald-900/50 text-emerald-200',
+};
+
 const REM_CATS: ReminderCategory[] = ['business', 'health', 'life', 'payment', 'travel'];
 const REM_LABELS: Record<ReminderCategory, string> = { business: 'ビジネス', health: '健康', life: 'ライフ', payment: '支払い', travel: '旅行' };
 const REM_COLORS: Record<ReminderCategory, string> = { business: '#6366f1', health: '#10b981', life: '#8b5cf6', payment: '#ef4444', travel: '#06b6d4' };
@@ -49,6 +75,16 @@ const NEWS_TAB_LABELS: Record<NewsTab, string> = {
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
+const HEALTH_RE = /病院|歯科|デンタル|クリニック|検診|健診|ジム|ランニング|筋トレ|治療|診察|カウンセリング|マッサージ|整体/i;
+const PERSONAL_RE = /プライベート|家族|旅行|買い物|ショッピング|映画|友人|休み|休暇|デート|習い事|美容|ヘアサロン|散髪/i;
+
+function categorizeEvent(summary: string, description: string | null): CalEventCategory {
+  const text = [summary, description ?? ''].join(' ').normalize('NFKC').toLowerCase();
+  if (HEALTH_RE.test(text)) return 'health';
+  if (PERSONAL_RE.test(text)) return 'personal';
+  return 'work';
+}
+
 function uid(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
@@ -158,6 +194,7 @@ function EventRow({ event }: { event: CalEvent }) {
           </div>
         )}
       </div>
+      <span className={`${BADGE_BASE} ${CAL_CAT_BADGE[event.category]}`}>{CAL_CAT_LABELS[event.category]}</span>
     </div>
   );
 }
@@ -238,12 +275,17 @@ export default function DashboardPage() {
       .then(r => r.json())
       .then(data => {
         if (data.error) throw new Error(data.error);
+        type RawEvent = Omit<CalEvent, 'category'>;
+        const allEvents: CalEvent[] = (data.events as RawEvent[]).map(e => ({
+          ...e,
+          category: categorizeEvent(e.summary, e.description),
+        }));
         const todayStr = new Date().toDateString();
-        setTodayEvents(data.events.filter((e: CalEvent) => {
+        setTodayEvents(allEvents.filter(e => {
           const d = new Date(e.start.includes('T') ? e.start : e.start + 'T00:00:00');
           return d.toDateString() === todayStr;
         }));
-        setWeekEvents(data.events);
+        setWeekEvents(allEvents);
       })
       .catch((e: Error) => setCalError(e.message))
       .finally(() => setCalLoading(false));
@@ -474,11 +516,10 @@ export default function DashboardPage() {
                     <div style={{ fontSize: '0.67rem', fontWeight: 700, color: day.isToday ? '#818cf8' : dayColor }}>{day.label}</div>
                     <div style={{ fontSize: '0.62rem', color: MUTED, marginBottom: '0.35rem' }}>{day.dateStr}</div>
                     {evs.slice(0, 2).map(e => (
-                      <div key={e.id} style={{
-                        fontSize: '0.59rem', background: ACCENT + '28', color: '#a5b4fc',
-                        borderRadius: 3, padding: '1px 4px', marginBottom: 2,
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      }}>
+                      <div
+                        key={e.id}
+                        className={`text-[0.59rem] rounded-sm px-1 mb-0.5 truncate ${WEEK_CHIP[e.category]}`}
+                      >
                         {e.summary}
                       </div>
                     ))}
@@ -553,7 +594,7 @@ export default function DashboardPage() {
                 }}>
                   {t.text}
                 </span>
-                <span style={pillStyle(TASK_COLORS[t.category])}>{TASK_LABELS[t.category]}</span>
+                <span className={`${BADGE_BASE} ${TASK_CAT_BADGE[t.category]}`}>{TASK_LABELS[t.category]}</span>
                 <button
                   onClick={() => setTasks(p => p.filter(x => x.id !== t.id))}
                   style={{ background: 'none', border: 'none', color: MUTED, cursor: 'pointer', fontSize: '1rem', lineHeight: 1, padding: '0 2px', flexShrink: 0 }}

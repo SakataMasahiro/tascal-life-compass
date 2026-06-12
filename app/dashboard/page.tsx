@@ -94,6 +94,21 @@ function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
 }
 
+function getMonthGrid(year: number, month: number): Date[][] {
+  const firstDay = new Date(year, month - 1, 1);
+  let startDow = firstDay.getDay() - 1; // 0=Mon … 6=Sun
+  if (startDow < 0) startDow = 6;
+  const totalDays = new Date(year, month, 0).getDate();
+  const cells: Date[] = [];
+  for (let i = startDow - 1; i >= 0; i--) cells.push(new Date(year, month - 1, -i));
+  for (let d = 1; d <= totalDays; d++) cells.push(new Date(year, month - 1, d));
+  const rem = (7 - (cells.length % 7)) % 7;
+  for (let d = 1; d <= rem; d++) cells.push(new Date(year, month, d));
+  const weeks: Date[][] = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+  return weeks;
+}
+
 function getWeekDays() {
   const today = new Date();
   const dow = today.getDay();
@@ -204,13 +219,20 @@ export default function DashboardPage() {
   const [now, setNow]               = useState(new Date());
   const [activeNav, setActiveNav]   = useState<NavSection>('calendar');
 
-  // Calendar
+  // Calendar — week view
   const [todayEvents, setTodayEvents] = useState<CalEvent[]>([]);
   const [weekEvents, setWeekEvents]   = useState<CalEvent[]>([]);
   const [calLoading, setCalLoading]   = useState(true);
   const [calError, setCalError]       = useState<string | null>(null);
   const [calSending, setCalSending]   = useState(false);
   const [calSent, setCalSent]         = useState(false);
+
+  // Calendar — month view
+  const [calView, setCalView]             = useState<'week' | 'month'>('week');
+  const [monthViewDate, setMonthViewDate] = useState({ year: new Date().getFullYear(), month: new Date().getMonth() + 1 });
+  const [monthEvents, setMonthEvents]     = useState<CalEvent[]>([]);
+  const [monthLoading, setMonthLoading]   = useState(false);
+  const [monthError, setMonthError]       = useState<string | null>(null);
 
   // Tasks
   const [tasks, setTasks]             = useState<Task[]>([]);
@@ -262,6 +284,27 @@ export default function DashboardPage() {
     if (!loadedRef.current) return;
     fetch('/api/data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reminders }) });
   }, [reminders]);
+
+  // Fetch calendar (month view)
+  useEffect(() => {
+    if (calView !== 'month') return;
+    const { year, month } = monthViewDate;
+    setMonthLoading(true);
+    setMonthError(null);
+    const from = new Date(year, month - 1, 1).toISOString();
+    const to   = new Date(year, month, 1).toISOString();
+    fetch(`/api/calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) throw new Error(data.error);
+        type RawEvent = Omit<CalEvent, 'category'>;
+        setMonthEvents((data.events as RawEvent[]).map(e => ({
+          ...e, category: categorizeEvent(e.summary, e.description),
+        })));
+      })
+      .catch((e: Error) => setMonthError(e.message))
+      .finally(() => setMonthLoading(false));
+  }, [calView, monthViewDate]);
 
   // Fetch calendar (this week)
   useEffect(() => {
@@ -325,6 +368,16 @@ export default function DashboardPage() {
     setReminders(p => [...p, { id: uid(), title: remTitle.trim(), datetime: remDatetime, category: remCat }]);
     setRemTitle('');
     setRemDatetime('');
+  }
+
+  function navigateMonth(delta: number) {
+    setMonthViewDate(prev => {
+      let { year, month } = prev;
+      month += delta;
+      if (month > 12) { month = 1; year++; }
+      if (month < 1)  { month = 12; year--; }
+      return { year, month };
+    });
   }
 
   async function sendCalEmail() {
@@ -473,64 +526,174 @@ export default function DashboardPage() {
 
         {/* ── Calendar ─────────────────────────────────────────────────── */}
         <div ref={calRef} style={{ marginBottom: '3rem', scrollMarginTop: '1rem' }}>
-          <SectionHeader icon="📅" title="Googleカレンダー" sub="今日と今週の予定を確認" />
+          <SectionHeader icon="📅" title="Googleカレンダー" sub="今日・今週・月表示で確認" />
 
-          <div style={cardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <div style={{ fontSize: '0.85rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                今日の予定
-                <span style={{ background: ACCENT + '22', color: '#818cf8', fontSize: '0.65rem', padding: '1px 8px', borderRadius: 20, fontWeight: 500 }}>
-                  {calLoading ? '…' : todayEvents.length}
-                </span>
-              </div>
+          {/* View tabs */}
+          <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '1rem' }}>
+            {(['week', 'month'] as const).map(v => (
               <button
-                onClick={sendCalEmail}
-                disabled={calSending || calSent || calLoading}
-                style={btnStyle(calSent ? '#10b981' : ACCENT, calSending || calSent || calLoading)}
+                key={v}
+                onClick={() => setCalView(v)}
+                style={{
+                  padding: '4px 16px', borderRadius: 20, fontSize: '0.75rem',
+                  cursor: 'pointer', fontFamily: 'inherit',
+                  border: `1px solid ${calView === v ? ACCENT : BORDER}`,
+                  background: calView === v ? ACCENT + '20' : 'transparent',
+                  color: calView === v ? '#818cf8' : MUTED,
+                  fontWeight: calView === v ? 600 : 400,
+                  transition: 'all 0.15s',
+                }}
               >
-                {calSent ? '✓ 送信済み' : calSending ? '送信中...' : 'Gmail に送信'}
+                {v === 'week' ? '今週' : '月表示'}
               </button>
-            </div>
-
-            {calLoading && <p style={{ color: MUTED, fontSize: '0.82rem', margin: 0 }}>読み込み中...</p>}
-            {calError  && <p style={{ color: '#ef4444', fontSize: '0.82rem', margin: 0 }}>⚠ {calError}</p>}
-            {!calLoading && !calError && todayEvents.length === 0 && <Empty msg="今日の予定はありません" />}
-            {todayEvents.map(e => <EventRow key={e.id} event={e} />)}
+            ))}
           </div>
 
-          <div style={{ ...cardStyle, marginTop: '1rem' }}>
-            <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.85rem' }}>今週の予定</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '0.4rem' }}>
-              {weekDays.map(day => {
-                const evs = weekEvents.filter(e => {
-                  const d = new Date(e.start.includes('T') ? e.start : e.start + 'T00:00:00');
-                  return d.toDateString() === day.date.toDateString();
-                });
-                const dayColor = day.isSun ? '#ef4444' : day.isSat ? '#06b6d4' : MUTED;
-                return (
-                  <div key={day.label} style={{
-                    background: day.isToday ? ACCENT + '12' : '#111',
-                    border: `1px solid ${day.isToday ? ACCENT + '55' : BORDER}`,
-                    borderRadius: 8, padding: '0.55rem 0.45rem', minHeight: 76,
-                  }}>
-                    <div style={{ fontSize: '0.67rem', fontWeight: 700, color: day.isToday ? '#818cf8' : dayColor }}>{day.label}</div>
-                    <div style={{ fontSize: '0.62rem', color: MUTED, marginBottom: '0.35rem' }}>{day.dateStr}</div>
-                    {evs.slice(0, 2).map(e => (
-                      <div
-                        key={e.id}
-                        className={`text-[0.59rem] rounded-sm px-1 mb-0.5 truncate ${WEEK_CHIP[e.category]}`}
-                      >
-                        {e.summary}
-                      </div>
-                    ))}
-                    {evs.length > 2 && (
-                      <div style={{ fontSize: '0.57rem', color: MUTED }}>+{evs.length - 2} 件</div>
-                    )}
+          {/* ── Week view ── */}
+          {calView === 'week' && (
+            <>
+              <div style={cardStyle}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    今日の予定
+                    <span style={{ background: ACCENT + '22', color: '#818cf8', fontSize: '0.65rem', padding: '1px 8px', borderRadius: 20, fontWeight: 500 }}>
+                      {calLoading ? '…' : todayEvents.length}
+                    </span>
                   </div>
-                );
-              })}
+                  <button
+                    onClick={sendCalEmail}
+                    disabled={calSending || calSent || calLoading}
+                    style={btnStyle(calSent ? '#10b981' : ACCENT, calSending || calSent || calLoading)}
+                  >
+                    {calSent ? '✓ 送信済み' : calSending ? '送信中...' : 'Gmail に送信'}
+                  </button>
+                </div>
+
+                {calLoading && <p style={{ color: MUTED, fontSize: '0.82rem', margin: 0 }}>読み込み中...</p>}
+                {calError  && <p style={{ color: '#ef4444', fontSize: '0.82rem', margin: 0 }}>⚠ {calError}</p>}
+                {!calLoading && !calError && todayEvents.length === 0 && <Empty msg="今日の予定はありません" />}
+                {todayEvents.map(e => <EventRow key={e.id} event={e} />)}
+              </div>
+
+              <div style={{ ...cardStyle, marginTop: '1rem' }}>
+                <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.85rem' }}>今週の予定</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '0.4rem' }}>
+                  {weekDays.map(day => {
+                    const evs = weekEvents.filter(e => {
+                      const d = new Date(e.start.includes('T') ? e.start : e.start + 'T00:00:00');
+                      return d.toDateString() === day.date.toDateString();
+                    });
+                    const dayColor = day.isSun ? '#ef4444' : day.isSat ? '#06b6d4' : MUTED;
+                    return (
+                      <div key={day.label} style={{
+                        background: day.isToday ? ACCENT + '12' : '#111',
+                        border: `1px solid ${day.isToday ? ACCENT + '55' : BORDER}`,
+                        borderRadius: 8, padding: '0.55rem 0.45rem', minHeight: 76,
+                      }}>
+                        <div style={{ fontSize: '0.67rem', fontWeight: 700, color: day.isToday ? '#818cf8' : dayColor }}>{day.label}</div>
+                        <div style={{ fontSize: '0.62rem', color: MUTED, marginBottom: '0.35rem' }}>{day.dateStr}</div>
+                        {evs.slice(0, 2).map(e => (
+                          <div key={e.id} className={`text-[0.59rem] rounded-sm px-1 mb-0.5 truncate ${WEEK_CHIP[e.category]}`}>
+                            {e.summary}
+                          </div>
+                        ))}
+                        {evs.length > 2 && (
+                          <div style={{ fontSize: '0.57rem', color: MUTED }}>+{evs.length - 2} 件</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* ── Month view ── */}
+          {calView === 'month' && (
+            <div style={cardStyle}>
+              {/* Month navigation header */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                <button
+                  onClick={() => navigateMonth(-1)}
+                  style={{ background: 'none', border: `1px solid ${BORDER}`, borderRadius: 6, color: MUTED, cursor: 'pointer', fontSize: '0.85rem', padding: '3px 10px', fontFamily: 'inherit', transition: 'color 0.15s' }}
+                  onMouseEnter={e => { e.currentTarget.style.color = TEXT; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = MUTED; }}
+                >◀</button>
+                <span style={{ fontSize: '0.95rem', fontWeight: 700, color: TEXT, letterSpacing: '-0.01em' }}>
+                  {monthViewDate.year}年{monthViewDate.month}月
+                </span>
+                <button
+                  onClick={() => navigateMonth(1)}
+                  style={{ background: 'none', border: `1px solid ${BORDER}`, borderRadius: 6, color: MUTED, cursor: 'pointer', fontSize: '0.85rem', padding: '3px 10px', fontFamily: 'inherit', transition: 'color 0.15s' }}
+                  onMouseEnter={e => { e.currentTarget.style.color = TEXT; }}
+                  onMouseLeave={e => { e.currentTarget.style.color = MUTED; }}
+                >▶</button>
+              </div>
+
+              {/* Day-of-week header row */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '3px', marginBottom: '3px' }}>
+                {WEEK_LABELS.map((lbl, i) => (
+                  <div key={lbl} style={{
+                    textAlign: 'center', fontSize: '0.65rem', fontWeight: 700, padding: '4px 0',
+                    color: i === 6 ? '#ef4444' : i === 5 ? '#06b6d4' : MUTED,
+                  }}>
+                    {lbl}
+                  </div>
+                ))}
+              </div>
+
+              {/* Loading / error */}
+              {monthLoading && <p style={{ color: MUTED, fontSize: '0.82rem', margin: '1rem 0', textAlign: 'center' }}>読み込み中...</p>}
+              {monthError  && <p style={{ color: '#ef4444', fontSize: '0.82rem', margin: '1rem 0' }}>⚠ {monthError}</p>}
+
+              {/* Month grid */}
+              {!monthLoading && !monthError && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '3px' }}>
+                  {getMonthGrid(monthViewDate.year, monthViewDate.month).flat().map((date, idx) => {
+                    const isCurrentMonth = date.getMonth() === monthViewDate.month - 1;
+                    const isToday = date.toDateString() === new Date().toDateString();
+                    const isSat = idx % 7 === 5;
+                    const isSun = idx % 7 === 6;
+                    const dateColor = isSun ? '#ef4444' : isSat ? '#06b6d4' : (isToday ? '#818cf8' : (isCurrentMonth ? TEXT : MUTED));
+                    const evs = monthEvents.filter(e => {
+                      const d = new Date(e.start.includes('T') ? e.start : e.start + 'T00:00:00');
+                      return d.toDateString() === date.toDateString();
+                    });
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          background: isToday ? ACCENT + '12' : isCurrentMonth ? '#111' : '#0a0a0a',
+                          border: `1px solid ${isToday ? ACCENT + '55' : BORDER}`,
+                          borderRadius: 6,
+                          padding: '5px 5px 4px',
+                          minHeight: 72,
+                          opacity: isCurrentMonth ? 1 : 0.4,
+                        }}
+                      >
+                        <div style={{
+                          fontSize: '0.67rem', fontWeight: isToday ? 700 : 500,
+                          color: dateColor,
+                          marginBottom: '3px',
+                          lineHeight: 1,
+                        }}>
+                          {date.getDate()}
+                        </div>
+                        {evs.slice(0, 2).map(e => (
+                          <div key={e.id} className={`text-[0.59rem] rounded-sm px-1 mb-0.5 truncate ${WEEK_CHIP[e.category]}`}>
+                            {e.summary}
+                          </div>
+                        ))}
+                        {evs.length > 2 && (
+                          <div style={{ fontSize: '0.55rem', color: MUTED }}>+{evs.length - 2} 件</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          </div>
+          )}
         </div>
 
         {/* ── Tasks ────────────────────────────────────────────────────── */}

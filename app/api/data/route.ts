@@ -15,6 +15,13 @@ async function getRow(key: string): Promise<unknown[]> {
   return (data?.value as unknown[]) ?? [];
 }
 
+async function setRow(key: string, value: unknown): Promise<{ error: string | null }> {
+  const { error } = await supabase
+    .from('lc_data')
+    .upsert({ key, value }, { onConflict: 'key' });
+  return { error: error?.message ?? null };
+}
+
 export async function GET() {
   const [tasks, reminders] = await Promise.all([
     getRow('tasks'),
@@ -25,29 +32,14 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json() as Record<string, unknown>;
-  const updates: Promise<unknown>[] = [];
 
   if ('tasks' in body) {
-    updates.push(
-      supabase.from('lc_data').upsert(
-        { key: 'tasks', value: body.tasks },
-        { onConflict: 'key' }
-      )
-    );
+    const { error } = await setRow('tasks', body.tasks);
+    if (error) return NextResponse.json({ ok: false, error }, { status: 500 });
   }
   if ('reminders' in body) {
-    updates.push(
-      supabase.from('lc_data').upsert(
-        { key: 'reminders', value: body.reminders },
-        { onConflict: 'key' }
-      )
-    );
-  }
-
-  const results = await Promise.all(updates);
-  const errors = results.filter((r: unknown) => (r as { error: unknown }).error);
-  if (errors.length > 0) {
-    return NextResponse.json({ ok: false, errors }, { status: 500 });
+    const { error } = await setRow('reminders', body.reminders);
+    if (error) return NextResponse.json({ ok: false, error }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true });

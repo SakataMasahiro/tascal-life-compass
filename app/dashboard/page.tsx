@@ -23,9 +23,13 @@ type Reminder = { id: string; title: string; datetime: string; category: Reminde
 type NewsItem = { title: string; link: string; pubDate: string; sourceLabel: string };
 type NewsGroup = 'japan' | 'world' | 'economy';
 
-type NavSection = 'compass' | 'calendar' | 'tasks' | 'reminders' | 'news';
+type NavSection = 'compass' | 'briefing' | 'calendar' | 'tasks' | 'reminders' | 'meditation' | 'journal' | 'news';
 
 type Wisdom = { tradition: string; author: string; quote: string; source: string; dateStr: string };
+
+type Briefing = { summary: string; priorities: string[]; alerts: string[]; dateStr: string };
+type JournalEntry  = { date: string; gratitude: string; insight: string; prayer: string; meditationMin: number; savedAt: string };
+type MeditationSession = { id: string; date: string; minutes: number; completedAt: string };
 
 // ── Color tokens ───────────────────────────────────────────────────────────────
 const BG      = '#0d0d0d';
@@ -285,15 +289,138 @@ export default function DashboardPage() {
   const [wisdomLoading, setWisdomLoading] = useState(true);
   const [wisdomDate, setWisdomDate]       = useState('');
 
-  const compassRef = useRef<HTMLDivElement>(null);
-  const calRef     = useRef<HTMLDivElement>(null);
-  const taskRef    = useRef<HTMLDivElement>(null);
-  const remRef     = useRef<HTMLDivElement>(null);
-  const newsRef    = useRef<HTMLDivElement>(null);
+  // Briefing
+  const [briefing, setBriefing]                   = useState<Briefing | null>(null);
+  const [briefingLoading, setBriefingLoading]     = useState(false);
+  const [briefingError, setBriefingError]         = useState<string | null>(null);
+  const [briefingGenerated, setBriefingGenerated] = useState(false);
+
+  // Meditation
+  const [medRunning, setMedRunning]   = useState(false);
+  const [medSeconds, setMedSeconds]   = useState(0);
+  const [medTarget, setMedTarget]     = useState(120);
+  const [medSessions, setMedSessions] = useState<MeditationSession[]>([]);
+  const [medStreak, setMedStreak]     = useState(0);
+  const [medTotalMin, setMedTotalMin] = useState(0);
+
+  // Journal
+  const [journal, setJournal]                     = useState({ gratitude: '', insight: '', prayer: '', meditationMin: 0 });
+  const [journalSaving, setJournalSaving]         = useState(false);
+  const [journalSaved, setJournalSaved]           = useState(false);
+  const [journalHistory, setJournalHistory]       = useState<JournalEntry[]>([]);
+  const [showJournalHistory, setShowJournalHistory] = useState(false);
+
+  const compassRef    = useRef<HTMLDivElement>(null);
+  const briefingRef   = useRef<HTMLDivElement>(null);
+  const calRef        = useRef<HTMLDivElement>(null);
+  const taskRef       = useRef<HTMLDivElement>(null);
+  const remRef        = useRef<HTMLDivElement>(null);
+  const meditationRef = useRef<HTMLDivElement>(null);
+  const journalRef    = useRef<HTMLDivElement>(null);
+  const newsRef       = useRef<HTMLDivElement>(null);
   const loadedRef        = useRef(false);
   const lastFetchDateRef = useRef('');
+  const medIntervalRef   = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Fetchers ──────────────────────────────────────────────────────────────
+  async function fetchBriefing() {
+    setBriefingLoading(true);
+    setBriefingError(null);
+    try {
+      const res  = await fetch('/api/briefing');
+      const data = await res.json() as Briefing & { error?: string };
+      if (data.error) throw new Error(data.error);
+      setBriefing(data);
+      setBriefingGenerated(true);
+    } catch (e: unknown) {
+      setBriefingError(e instanceof Error ? e.message : 'エラーが発生しました');
+    } finally {
+      setBriefingLoading(false);
+    }
+  }
+
+  function fetchMeditationData() {
+    fetch('/api/meditation?days=30')
+      .then(r => r.json())
+      .then((d: { sessions?: MeditationSession[]; streak?: number; totalMin?: number }) => {
+        setMedSessions(d.sessions ?? []);
+        setMedStreak(d.streak ?? 0);
+        setMedTotalMin(d.totalMin ?? 0);
+      })
+      .catch(() => {});
+  }
+
+  function fetchJournalToday() {
+    fetch('/api/journal')
+      .then(r => r.json())
+      .then((d: { entry?: JournalEntry | null }) => {
+        if (d.entry) {
+          setJournal({
+            gratitude:    d.entry.gratitude    ?? '',
+            insight:      d.entry.insight      ?? '',
+            prayer:       d.entry.prayer       ?? '',
+            meditationMin: d.entry.meditationMin ?? 0,
+          });
+        }
+      })
+      .catch(() => {});
+  }
+
+  function fetchJournalHistory() {
+    fetch('/api/journal?all=1')
+      .then(r => r.json())
+      .then((d: { entries?: JournalEntry[] }) => setJournalHistory(d.entries ?? []))
+      .catch(() => {});
+  }
+
+  function startMeditation() {
+    if (medRunning) return;
+    setMedRunning(true);
+    medIntervalRef.current = setInterval(() => setMedSeconds(s => s + 1), 1000);
+  }
+
+  function stopMeditation() {
+    if (medIntervalRef.current) clearInterval(medIntervalRef.current);
+    setMedRunning(false);
+  }
+
+  async function completeMeditation() {
+    stopMeditation();
+    const minutes = Math.max(1, Math.round(medSeconds / 60));
+    try {
+      const res = await fetch('/api/meditation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ minutes }),
+      });
+      const d = await res.json() as { ok: boolean; error?: string };
+      if (!d.ok) throw new Error(d.error);
+      setMedSeconds(0);
+      fetchMeditationData();
+    } catch (e: unknown) {
+      alert('保存失敗: ' + (e instanceof Error ? e.message : String(e)));
+    }
+  }
+
+  async function saveJournal() {
+    setJournalSaving(true);
+    try {
+      const res = await fetch('/api/journal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(journal),
+      });
+      const d = await res.json() as { ok: boolean; error?: string };
+      if (!d.ok) throw new Error(d.error);
+      setJournalSaved(true);
+      setTimeout(() => setJournalSaved(false), 3000);
+    } catch (e: unknown) {
+      alert('保存失敗: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setJournalSaving(false);
+    }
+  }
+
   function fetchWisdom() {
     setWisdomLoading(true);
     fetch('/api/compass')
@@ -420,14 +547,23 @@ export default function DashboardPage() {
     return () => clearInterval(t);
   }, []);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchMeditationData(); }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchJournalToday(); }, []);
+  useEffect(() => () => { if (medIntervalRef.current) clearInterval(medIntervalRef.current); }, []);
+
   function navTo(section: NavSection) {
     setActiveNav(section);
     const refMap: Record<NavSection, React.RefObject<HTMLDivElement>> = {
-      compass:   compassRef,
-      calendar:  calRef,
-      tasks:     taskRef,
-      reminders: remRef,
-      news:      newsRef,
+      compass:    compassRef,
+      briefing:   briefingRef,
+      calendar:   calRef,
+      tasks:      taskRef,
+      reminders:  remRef,
+      meditation: meditationRef,
+      journal:    journalRef,
+      news:       newsRef,
     };
     refMap[section].current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -505,11 +641,14 @@ export default function DashboardPage() {
   const doneTasks = tasks.filter(t => t.done).length;
 
   const NAV_ITEMS: { key: NavSection; icon: string; label: string }[] = [
-    { key: 'compass',   icon: '🧭', label: 'Compass' },
-    { key: 'calendar',  icon: '📅', label: 'カレンダー' },
-    { key: 'tasks',     icon: '✅', label: 'タスク' },
-    { key: 'reminders', icon: '🔔', label: 'リマインダー' },
-    { key: 'news',      icon: '📰', label: 'ニュース' },
+    { key: 'compass',    icon: '🧭', label: 'Compass' },
+    { key: 'briefing',   icon: '🤖', label: 'ブリーフィング' },
+    { key: 'calendar',   icon: '📅', label: 'カレンダー' },
+    { key: 'tasks',      icon: '✅', label: 'タスク' },
+    { key: 'reminders',  icon: '🔔', label: 'リマインダー' },
+    { key: 'meditation', icon: '🧘', label: '瞑想' },
+    { key: 'journal',    icon: '📓', label: 'ジャーナル' },
+    { key: 'news',       icon: '📰', label: 'ニュース' },
   ];
 
   const currentNews: NewsItem[] = Object.entries(newsData)
@@ -670,6 +809,240 @@ export default function DashboardPage() {
               </div>
             </div>
           )}
+        </div>
+
+        {/* ── Briefing ─────────────────────────────────────────────────── */}
+        <div ref={briefingRef} style={{ marginBottom: '3rem', scrollMarginTop: '1rem' }}>
+          <SectionHeader icon="🤖" title="AIブリーフィング" sub="カレンダー・メールをAIが分析" />
+          <div style={cardStyle}>
+            {!briefingGenerated && !briefingLoading && (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '1rem 0' }}>
+                <button
+                  onClick={fetchBriefing}
+                  style={btnStyle(ACCENT, false)}
+                >
+                  🤖 ブリーフィングを生成
+                </button>
+              </div>
+            )}
+            {briefingLoading && (
+              <p style={{ color: MUTED, fontSize: '0.82rem', textAlign: 'center', padding: '1rem 0', margin: 0 }}>
+                AIが分析中... (10〜20秒かかります)
+              </p>
+            )}
+            {briefingError && (
+              <p style={{ color: '#ef4444', fontSize: '0.82rem', margin: 0 }}>⚠ {briefingError}</p>
+            )}
+            {briefing && !briefingLoading && (
+              <div>
+                {/* Date */}
+                <div style={{ fontSize: '0.7rem', color: MUTED, marginBottom: '0.85rem' }}>{briefing.dateStr}</div>
+
+                {/* Summary */}
+                <p style={{ margin: '0 0 1.25rem', fontSize: '0.9rem', color: TEXT, lineHeight: 1.75 }}>
+                  {briefing.summary}
+                </p>
+
+                {/* Priorities */}
+                <div style={{ marginBottom: '1rem' }}>
+                  <div style={{ fontSize: '0.72rem', color: ACCENT, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '0.5rem' }}>
+                    優先事項
+                  </div>
+                  {(briefing.priorities ?? []).map((p, i) => (
+                    <div key={i} style={{ display: 'flex', gap: '0.6rem', padding: '0.35rem 0', borderBottom: `1px solid ${BORDER}`, alignItems: 'flex-start' }}>
+                      <span style={{ color: ACCENT, fontWeight: 700, fontSize: '0.8rem', flexShrink: 0, marginTop: 1 }}>{i + 1}.</span>
+                      <span style={{ fontSize: '0.85rem', color: TEXT }}>{p}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Alerts */}
+                {(briefing.alerts ?? []).length > 0 && (
+                  <div>
+                    <div style={{ fontSize: '0.72rem', color: '#f59e0b', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '0.5rem' }}>
+                      注意事項
+                    </div>
+                    {briefing.alerts.map((a, i) => (
+                      <div key={i} style={{ display: 'flex', gap: '0.6rem', padding: '0.35rem 0', alignItems: 'flex-start' }}>
+                        <span style={{ color: '#f59e0b', fontSize: '0.85rem' }}>⚠</span>
+                        <span style={{ fontSize: '0.85rem', color: TEXT }}>{a}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Regenerate */}
+                <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={fetchBriefing}
+                    disabled={briefingLoading}
+                    style={{ ...btnStyle('#374151', briefingLoading), fontSize: '0.75rem', padding: '0.35rem 0.85rem' }}
+                  >
+                    再生成
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Meditation ───────────────────────────────────────────────── */}
+        <div ref={meditationRef} style={{ marginBottom: '3rem', scrollMarginTop: '1rem' }}>
+          <SectionHeader icon="🧘" title="瞑想タイマー" sub={`連続 ${medStreak} 日 / 今月合計 ${medTotalMin} 分`} />
+          <div style={cardStyle}>
+            {/* Timer display */}
+            <div style={{ textAlign: 'center', padding: '1.5rem 0 1rem' }}>
+              <div style={{
+                fontSize: '3.5rem', fontWeight: 200, letterSpacing: '-0.04em',
+                fontVariantNumeric: 'tabular-nums', color: medRunning ? '#10b981' : TEXT,
+                transition: 'color 0.3s',
+              }}>
+                {String(Math.floor(medSeconds / 60)).padStart(2, '0')}:{String(medSeconds % 60).padStart(2, '0')}
+              </div>
+              <div style={{ fontSize: '0.72rem', color: MUTED, marginTop: '0.25rem' }}>
+                目標: {Math.floor(medTarget / 60)}分
+                {medRunning && medSeconds >= medTarget && ' ✓ 達成！'}
+              </div>
+              {/* Target selector */}
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}>
+                {[60, 120, 300, 600, 1200].map(sec => (
+                  <button
+                    key={sec}
+                    onClick={() => setMedTarget(sec)}
+                    style={{
+                      padding: '3px 12px', borderRadius: 20, fontSize: '0.72rem', cursor: 'pointer', fontFamily: 'inherit',
+                      border: `1px solid ${medTarget === sec ? '#10b981' : BORDER}`,
+                      background: medTarget === sec ? '#10b98120' : 'transparent',
+                      color: medTarget === sec ? '#10b981' : MUTED,
+                    }}
+                  >
+                    {Math.floor(sec / 60)}分
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Controls */}
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
+              {!medRunning ? (
+                <button onClick={startMeditation} style={btnStyle('#10b981', false)}>▶ 開始</button>
+              ) : (
+                <button onClick={stopMeditation} style={btnStyle('#6b7280', false)}>⏸ 一時停止</button>
+              )}
+              {medSeconds > 0 && (
+                <button onClick={completeMeditation} style={btnStyle(ACCENT, false)}>✓ 完了・保存</button>
+              )}
+              {medSeconds > 0 && !medRunning && (
+                <button onClick={() => setMedSeconds(0)} style={{ ...btnStyle('#374151', false), fontSize: '0.75rem' }}>リセット</button>
+              )}
+            </div>
+
+            {/* Recent sessions */}
+            {medSessions.length > 0 && (
+              <div style={{ borderTop: `1px solid ${BORDER}`, paddingTop: '1rem' }}>
+                <div style={{ fontSize: '0.72rem', color: MUTED, marginBottom: '0.5rem' }}>最近の記録</div>
+                {medSessions.slice(-5).reverse().map(s => (
+                  <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.3rem 0', fontSize: '0.8rem', borderBottom: `1px solid ${BORDER}` }}>
+                    <span style={{ color: MUTED }}>{s.date}</span>
+                    <span style={{ color: TEXT, fontWeight: 500 }}>{s.minutes} 分</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Journal ──────────────────────────────────────────────────── */}
+        <div ref={journalRef} style={{ marginBottom: '3rem', scrollMarginTop: '1rem' }}>
+          <SectionHeader icon="📓" title="今日のジャーナル" sub="感謝・洞察・祈り・瞑想の記録" />
+          <div style={cardStyle}>
+            {/* Gratitude */}
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{ fontSize: '0.72rem', color: MUTED, fontWeight: 600, letterSpacing: '0.06em', display: 'block', marginBottom: '0.4rem' }}>
+                🙏 感謝（Gratitude）
+              </label>
+              <textarea
+                value={journal.gratitude}
+                onChange={e => setJournal(p => ({ ...p, gratitude: e.target.value }))}
+                placeholder="今日感謝していることを書いてください..."
+                rows={3}
+                style={{ ...inputStyle, width: '100%', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6 } as React.CSSProperties}
+              />
+            </div>
+
+            {/* Insight */}
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{ fontSize: '0.72rem', color: MUTED, fontWeight: 600, letterSpacing: '0.06em', display: 'block', marginBottom: '0.4rem' }}>
+                💡 気づき（Insight）
+              </label>
+              <textarea
+                value={journal.insight}
+                onChange={e => setJournal(p => ({ ...p, insight: e.target.value }))}
+                placeholder="今日気づいたことや学んだことを..."
+                rows={3}
+                style={{ ...inputStyle, width: '100%', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6 } as React.CSSProperties}
+              />
+            </div>
+
+            {/* Prayer */}
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{ fontSize: '0.72rem', color: MUTED, fontWeight: 600, letterSpacing: '0.06em', display: 'block', marginBottom: '0.4rem' }}>
+                🕯 祈り・意図（Prayer）
+              </label>
+              <textarea
+                value={journal.prayer}
+                onChange={e => setJournal(p => ({ ...p, prayer: e.target.value }))}
+                placeholder="明日への意図や祈りを..."
+                rows={3}
+                style={{ ...inputStyle, width: '100%', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6 } as React.CSSProperties}
+              />
+            </div>
+
+            {/* Meditation minutes */}
+            <div style={{ marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <label style={{ fontSize: '0.72rem', color: MUTED, fontWeight: 600, letterSpacing: '0.06em', flexShrink: 0 }}>
+                🧘 瞑想時間（分）
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={240}
+                value={journal.meditationMin}
+                onChange={e => setJournal(p => ({ ...p, meditationMin: Number(e.target.value) }))}
+                style={{ ...inputStyle, width: 80 }}
+              />
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <button
+                onClick={() => { setShowJournalHistory(v => !v); if (!showJournalHistory) fetchJournalHistory(); }}
+                style={{ background: 'none', border: `1px solid ${BORDER}`, borderRadius: 8, color: MUTED, cursor: 'pointer', fontSize: '0.75rem', padding: '0.4rem 0.85rem', fontFamily: 'inherit' }}
+              >
+                {showJournalHistory ? '▲ 履歴を閉じる' : '📚 過去の記録'}
+              </button>
+              <button onClick={saveJournal} disabled={journalSaving || journalSaved} style={btnStyle(journalSaved ? '#10b981' : ACCENT, journalSaving || journalSaved)}>
+                {journalSaved ? '✓ 保存済み' : journalSaving ? '保存中...' : '保存'}
+              </button>
+            </div>
+
+            {/* History */}
+            {showJournalHistory && (
+              <div style={{ marginTop: '1.25rem', borderTop: `1px solid ${BORDER}`, paddingTop: '1rem' }}>
+                <div style={{ fontSize: '0.72rem', color: MUTED, marginBottom: '0.75rem' }}>過去の記録（新しい順）</div>
+                {journalHistory.length === 0 && <Empty msg="記録がありません" />}
+                {journalHistory.map(e => (
+                  <div key={e.date} style={{ marginBottom: '1rem', padding: '0.85rem', background: '#0a0a0a', borderRadius: 8, border: `1px solid ${BORDER}` }}>
+                    <div style={{ fontSize: '0.72rem', color: GOLD, fontWeight: 600, marginBottom: '0.5rem' }}>{e.date}</div>
+                    {e.gratitude && <p style={{ margin: '0 0 0.35rem', fontSize: '0.8rem', color: MUTED }}><span style={{ color: TEXT }}>🙏</span> {e.gratitude}</p>}
+                    {e.insight   && <p style={{ margin: '0 0 0.35rem', fontSize: '0.8rem', color: MUTED }}><span style={{ color: TEXT }}>💡</span> {e.insight}</p>}
+                    {e.prayer    && <p style={{ margin: '0 0 0.35rem', fontSize: '0.8rem', color: MUTED }}><span style={{ color: TEXT }}>🕯</span> {e.prayer}</p>}
+                    {e.meditationMin > 0 && <p style={{ margin: 0, fontSize: '0.75rem', color: MUTED }}>🧘 {e.meditationMin}分</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* ── Calendar ─────────────────────────────────────────────────── */}

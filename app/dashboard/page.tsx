@@ -20,10 +20,12 @@ type Task = { id: string; text: string; done: boolean; category: TaskCategory };
 type ReminderCategory = 'business' | 'health' | 'life' | 'payment' | 'travel';
 type Reminder = { id: string; title: string; datetime: string; category: ReminderCategory };
 
-type NewsItem = { title: string; link: string };
-type NewsTab  = 'nikkei' | 'wsj' | 'economist';
+type NewsItem = { title: string; link: string; pubDate: string; sourceLabel: string };
+type NewsGroup = 'japan' | 'world' | 'economy';
 
-type NavSection = 'calendar' | 'tasks' | 'reminders' | 'news';
+type NavSection = 'compass' | 'calendar' | 'tasks' | 'reminders' | 'news';
+
+type Wisdom = { tradition: string; author: string; quote: string; source: string; dateStr: string };
 
 // ── Color tokens ───────────────────────────────────────────────────────────────
 const BG      = '#0d0d0d';
@@ -33,6 +35,7 @@ const BORDER  = '#242424';
 const TEXT    = '#e0e0e0';
 const MUTED   = '#6b7280';
 const ACCENT  = '#6366f1';
+const GOLD    = '#c9993a';
 
 // ── Category metadata ──────────────────────────────────────────────────────────
 const TASK_CATS: TaskCategory[] = ['work', 'personal', 'health', 'other'];
@@ -68,10 +71,21 @@ const REM_COLORS: Record<ReminderCategory, string> = { business: '#6366f1', heal
 
 const WEEK_LABELS = ['月', '火', '水', '木', '金', '土', '日'];
 
-const NEWS_TAB_LABELS: Record<NewsTab, string> = {
-  nikkei:    'NHK',
-  wsj:       'WSJ',
-  economist: 'Economist',
+const NEWS_GROUP_LABELS: Record<NewsGroup, string> = {
+  japan:   '日本',
+  world:   '世界',
+  economy: '経済',
+};
+
+const FEED_META: Record<string, { label: string; group: NewsGroup }> = {
+  nikkei:   { label: 'NHK',       group: 'japan'   },
+  guardian: { label: 'Guardian',  group: 'world'   },
+  bbc:      { label: 'BBC',       group: 'world'   },
+  nyt:      { label: 'NYT',       group: 'world'   },
+  wsj:      { label: 'WSJ',       group: 'economy' },
+  ft:       { label: 'FT',        group: 'economy' },
+  economist:{ label: 'Economist', group: 'economy' },
+  cnbc:     { label: 'CNBC',      group: 'economy' },
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -126,6 +140,18 @@ function getWeekDays() {
       isSun: i === 6,
     };
   });
+}
+
+function relativeTime(pubDate: string): string {
+  if (!pubDate) return '';
+  const ms = Date.now() - new Date(pubDate).getTime();
+  if (isNaN(ms) || ms < 0) return '';
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 1)  return 'たった今';
+  if (mins < 60) return `${mins}分前`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}時間前`;
+  return `${Math.floor(hours / 24)}日前`;
 }
 
 // ── Style helpers ──────────────────────────────────────────────────────────────
@@ -249,22 +275,84 @@ export default function DashboardPage() {
   const [remSent, setRemSent]         = useState(false);
 
   // News
-  const [newsData, setNewsData]       = useState<Record<string, NewsItem[]>>({});
-  const [newsTab, setNewsTab]         = useState<NewsTab>('nikkei');
-  const [newsLoading, setNewsLoading] = useState(true);
-  const [newsErrors, setNewsErrors]   = useState<string[]>([]);
+  const [newsData, setNewsData]         = useState<Record<string, Array<{ title: string; link: string; pubDate: string }>>>({});
+  const [newsGroup, setNewsGroup]       = useState<NewsGroup>('japan');
+  const [newsLoading, setNewsLoading]   = useState(true);
+  const [newsErrors, setNewsErrors]     = useState<string[]>([]);
 
-  const calRef    = useRef<HTMLDivElement>(null);
-  const taskRef   = useRef<HTMLDivElement>(null);
-  const remRef    = useRef<HTMLDivElement>(null);
-  const newsRef   = useRef<HTMLDivElement>(null);
-  const loadedRef = useRef(false);
+  // Compass
+  const [wisdom, setWisdom]               = useState<Wisdom | null>(null);
+  const [wisdomLoading, setWisdomLoading] = useState(true);
+  const [wisdomDate, setWisdomDate]       = useState('');
 
-  // Clock
+  const compassRef = useRef<HTMLDivElement>(null);
+  const calRef     = useRef<HTMLDivElement>(null);
+  const taskRef    = useRef<HTMLDivElement>(null);
+  const remRef     = useRef<HTMLDivElement>(null);
+  const newsRef    = useRef<HTMLDivElement>(null);
+  const loadedRef        = useRef(false);
+  const lastFetchDateRef = useRef('');
+
+  // ── Fetchers ──────────────────────────────────────────────────────────────
+  function fetchWisdom() {
+    setWisdomLoading(true);
+    fetch('/api/compass')
+      .then(r => r.json())
+      .then((data: Wisdom) => {
+        setWisdom(data);
+        setWisdomDate(data.dateStr ?? '');
+        lastFetchDateRef.current = new Date().toDateString();
+      })
+      .catch(() => {})
+      .finally(() => setWisdomLoading(false));
+  }
+
+  function fetchCalendar() {
+    const days = getWeekDays();
+    const from = days[0].date.toISOString();
+    const endDate = new Date(days[6].date);
+    endDate.setDate(endDate.getDate() + 1);
+    const to = endDate.toISOString();
+    setCalLoading(true);
+    setCalError(null);
+    fetch(`/api/calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) throw new Error(data.error);
+        type RawEvent = Omit<CalEvent, 'category'>;
+        const allEvents: CalEvent[] = (data.events as RawEvent[]).map(e => ({
+          ...e,
+          category: categorizeEvent(e.summary, e.description),
+        }));
+        const todayStr = new Date().toDateString();
+        setTodayEvents(allEvents.filter(e => {
+          const d = new Date(e.start.includes('T') ? e.start : e.start + 'T00:00:00');
+          return d.toDateString() === todayStr;
+        }));
+        setWeekEvents(allEvents);
+      })
+      .catch((e: Error) => setCalError(e.message))
+      .finally(() => setCalLoading(false));
+  }
+
+  // Clock + date-change detection
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000);
+    const t = setInterval(() => {
+      const n = new Date();
+      setNow(n);
+      const today = n.toDateString();
+      if (lastFetchDateRef.current && lastFetchDateRef.current !== today) {
+        fetchWisdom();
+        fetchCalendar();
+      }
+    }, 1000);
     return () => clearInterval(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Fetch today's wisdom
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchWisdom(); }, []);
 
   // Persist — server-side JSON files
   useEffect(() => {
@@ -306,49 +394,36 @@ export default function DashboardPage() {
       .finally(() => setMonthLoading(false));
   }, [calView, monthViewDate]);
 
-  // Fetch calendar (this week)
+  // Fetch calendar (this week) + 30-min auto-refresh
   useEffect(() => {
-    const days = getWeekDays();
-    const from = days[0].date.toISOString();
-    const endDate = new Date(days[6].date);
-    endDate.setDate(endDate.getDate() + 1);
-    const to = endDate.toISOString();
-
-    fetch(`/api/calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
-      .then(r => r.json())
-      .then(data => {
-        if (data.error) throw new Error(data.error);
-        type RawEvent = Omit<CalEvent, 'category'>;
-        const allEvents: CalEvent[] = (data.events as RawEvent[]).map(e => ({
-          ...e,
-          category: categorizeEvent(e.summary, e.description),
-        }));
-        const todayStr = new Date().toDateString();
-        setTodayEvents(allEvents.filter(e => {
-          const d = new Date(e.start.includes('T') ? e.start : e.start + 'T00:00:00');
-          return d.toDateString() === todayStr;
-        }));
-        setWeekEvents(allEvents);
-      })
-      .catch((e: Error) => setCalError(e.message))
-      .finally(() => setCalLoading(false));
+    fetchCalendar();
+    const t = setInterval(fetchCalendar, 30 * 60 * 1000);
+    return () => clearInterval(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Fetch News
+  // Fetch News + 60-min auto-refresh
   useEffect(() => {
-    fetch('/api/news')
-      .then(r => r.json())
-      .then(data => {
-        setNewsData(data.results ?? {});
-        if (data.errors) setNewsErrors(data.errors);
-      })
-      .catch((e: Error) => setNewsErrors([e.message]))
-      .finally(() => setNewsLoading(false));
+    function fetchNews() {
+      setNewsLoading(true);
+      fetch('/api/news')
+        .then(r => r.json())
+        .then(data => {
+          setNewsData(data.results ?? {});
+          if (data.errors) setNewsErrors(data.errors);
+        })
+        .catch((e: Error) => setNewsErrors([e.message]))
+        .finally(() => setNewsLoading(false));
+    }
+    fetchNews();
+    const t = setInterval(fetchNews, 60 * 60 * 1000);
+    return () => clearInterval(t);
   }, []);
 
   function navTo(section: NavSection) {
     setActiveNav(section);
     const refMap: Record<NavSection, React.RefObject<HTMLDivElement>> = {
+      compass:   compassRef,
       calendar:  calRef,
       tasks:     taskRef,
       reminders: remRef,
@@ -430,13 +505,27 @@ export default function DashboardPage() {
   const doneTasks = tasks.filter(t => t.done).length;
 
   const NAV_ITEMS: { key: NavSection; icon: string; label: string }[] = [
+    { key: 'compass',   icon: '🧭', label: 'Compass' },
     { key: 'calendar',  icon: '📅', label: 'カレンダー' },
     { key: 'tasks',     icon: '✅', label: 'タスク' },
     { key: 'reminders', icon: '🔔', label: 'リマインダー' },
     { key: 'news',      icon: '📰', label: 'ニュース' },
   ];
 
-  const currentNews: NewsItem[] = newsData[newsTab] ?? [];
+  const currentNews: NewsItem[] = Object.entries(newsData)
+    .filter(([key]) => FEED_META[key]?.group === newsGroup)
+    .flatMap(([key, items]) => items.map(item => ({
+      ...item,
+      sourceLabel: FEED_META[key]?.label ?? key,
+    })))
+    .sort((a, b) => {
+      const ta = new Date(a.pubDate).getTime();
+      const tb = new Date(b.pubDate).getTime();
+      if (isNaN(ta) && isNaN(tb)) return 0;
+      if (isNaN(ta)) return 1;
+      if (isNaN(tb)) return -1;
+      return tb - ta;
+    });
 
   return (
     <div style={{
@@ -523,6 +612,65 @@ export default function DashboardPage() {
 
       {/* ── Main ─────────────────────────────────────────────────────────── */}
       <main style={{ flex: 1, overflowY: 'auto', padding: '2rem 2.5rem', minWidth: 0 }}>
+
+        {/* ── Compass ──────────────────────────────────────────────────── */}
+        <div ref={compassRef} style={{ marginBottom: '3rem', scrollMarginTop: '1rem' }}>
+          <SectionHeader icon="🧭" title="今日のCompass" sub={wisdomDate || '毎日変わる知恵の言葉'} />
+          {wisdomLoading && (
+            <div style={{ ...cardStyle, color: MUTED, fontSize: '0.82rem' }}>読み込み中...</div>
+          )}
+          {!wisdomLoading && wisdom && (
+            <div style={{
+              ...cardStyle,
+              border: `1px solid ${GOLD}33`,
+              position: 'relative',
+              overflow: 'hidden',
+              padding: '2rem 2.5rem',
+            }}>
+              {/* Gold top accent line */}
+              <div style={{
+                position: 'absolute', top: 0, left: 0, right: 0, height: 2,
+                background: `linear-gradient(90deg, ${GOLD}, transparent)`,
+              }} />
+
+              {/* Tradition badge */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1.25rem' }}>
+                <span style={{
+                  fontSize: '0.68rem', padding: '3px 12px', borderRadius: 20,
+                  background: GOLD + '18', color: GOLD, border: `1px solid ${GOLD}44`,
+                  fontWeight: 600, letterSpacing: '0.04em',
+                }}>
+                  {wisdom.tradition}
+                </span>
+              </div>
+
+              {/* Quote */}
+              <blockquote style={{
+                margin: '0 0 1.5rem',
+                padding: '0 0 0 1.5rem',
+                borderLeft: `3px solid ${GOLD}`,
+                fontFamily: "Georgia, 'Times New Roman', 'Hiragino Mincho ProN', serif",
+                fontSize: '1.15rem',
+                lineHeight: 2,
+                color: '#e8e8e8',
+                fontWeight: 300,
+                letterSpacing: '0.02em',
+              }}>
+                「{wisdom.quote}」
+              </blockquote>
+
+              {/* Author + source */}
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <span style={{ color: GOLD, fontSize: '0.85rem', fontWeight: 500 }}>
+                  — {wisdom.author}
+                </span>
+                <span style={{ color: MUTED, fontSize: '0.75rem', fontStyle: 'italic' }}>
+                  {wisdom.source}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* ── Calendar ─────────────────────────────────────────────────── */}
         <div ref={calRef} style={{ marginBottom: '3rem', scrollMarginTop: '1rem' }}>
@@ -854,25 +1002,26 @@ export default function DashboardPage() {
 
         {/* ── News ─────────────────────────────────────────────────────── */}
         <div ref={newsRef} style={{ marginBottom: '3rem', scrollMarginTop: '1rem' }}>
-          <SectionHeader icon="📰" title="ニュース" sub="NHK・WSJ・Economistの最新ヘッドライン" />
+          <SectionHeader icon="📰" title="ニュース" sub="NHK・Guardian・BBC・NYT・WSJ・FT・Economist・CNBC" />
           <div style={cardStyle}>
 
+            {/* Group tabs */}
             <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '1.1rem', borderBottom: `1px solid ${BORDER}`, paddingBottom: '0.75rem' }}>
-              {(['nikkei', 'wsj', 'economist'] as NewsTab[]).map(tab => (
+              {(['japan', 'world', 'economy'] as NewsGroup[]).map(g => (
                 <button
-                  key={tab}
-                  onClick={() => setNewsTab(tab)}
+                  key={g}
+                  onClick={() => setNewsGroup(g)}
                   style={{
-                    padding: '4px 16px', borderRadius: 20, fontSize: '0.75rem',
+                    padding: '4px 20px', borderRadius: 20, fontSize: '0.78rem',
                     cursor: 'pointer', fontFamily: 'inherit',
-                    border: `1px solid ${newsTab === tab ? ACCENT : BORDER}`,
-                    background: newsTab === tab ? ACCENT + '20' : 'transparent',
-                    color: newsTab === tab ? '#818cf8' : MUTED,
-                    fontWeight: newsTab === tab ? 600 : 400,
+                    border: `1px solid ${newsGroup === g ? ACCENT : BORDER}`,
+                    background: newsGroup === g ? ACCENT + '20' : 'transparent',
+                    color: newsGroup === g ? '#818cf8' : MUTED,
+                    fontWeight: newsGroup === g ? 600 : 400,
                     transition: 'all 0.15s',
                   }}
                 >
-                  {NEWS_TAB_LABELS[tab]}
+                  {NEWS_GROUP_LABELS[g]}
                 </button>
               ))}
             </div>
@@ -888,38 +1037,50 @@ export default function DashboardPage() {
             {!newsLoading && currentNews.length === 0 && (
               <Empty msg="記事を取得できませんでした" />
             )}
-            {currentNews.map((item, i) => (
-              <div
-                key={i}
-                style={{
-                  padding: '0.65rem 0',
-                  borderBottom: i < currentNews.length - 1 ? `1px solid ${BORDER}` : 'none',
-                  display: 'flex', alignItems: 'flex-start', gap: '0.75rem',
-                }}
-              >
-                <span style={{
-                  flexShrink: 0, marginTop: 2,
-                  fontSize: '0.65rem', color: MUTED,
-                  fontVariantNumeric: 'tabular-nums', minWidth: 16,
-                }}>
-                  {i + 1}
-                </span>
-                <a
-                  href={item.link}
-                  target="_blank"
-                  rel="noopener noreferrer"
+            {currentNews.map((item, i) => {
+              const rel = relativeTime(item.pubDate);
+              return (
+                <div
+                  key={i}
                   style={{
-                    flex: 1, color: TEXT, textDecoration: 'none',
-                    fontSize: '0.875rem', lineHeight: 1.55,
-                    transition: 'color 0.15s',
+                    padding: '0.65rem 0',
+                    borderBottom: i < currentNews.length - 1 ? `1px solid ${BORDER}` : 'none',
+                    display: 'flex', alignItems: 'flex-start', gap: '0.65rem',
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.color = '#818cf8'; }}
-                  onMouseLeave={e => { e.currentTarget.style.color = TEXT; }}
                 >
-                  {item.title}
-                </a>
-              </div>
-            ))}
+                  <span style={{
+                    flexShrink: 0, marginTop: '3px',
+                    fontSize: '0.62rem', padding: '2px 7px', borderRadius: 10,
+                    background: ACCENT + '18', color: '#818cf8',
+                    border: `1px solid ${ACCENT}33`,
+                    whiteSpace: 'nowrap', fontWeight: 600,
+                  }}>
+                    {item.sourceLabel}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <a
+                      href={item.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        display: 'block', color: TEXT, textDecoration: 'none',
+                        fontSize: '0.875rem', lineHeight: 1.55,
+                        transition: 'color 0.15s',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.color = '#818cf8'; }}
+                      onMouseLeave={e => { e.currentTarget.style.color = TEXT; }}
+                    >
+                      {item.title}
+                    </a>
+                    {rel && (
+                      <span style={{ fontSize: '0.67rem', color: MUTED, marginTop: '2px', display: 'block' }}>
+                        {rel}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
 

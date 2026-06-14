@@ -23,13 +23,12 @@ type Reminder = { id: string; title: string; datetime: string; category: Reminde
 type NewsItem = { title: string; link: string; pubDate: string; sourceLabel: string };
 type NewsGroup = 'japan' | 'world' | 'economy';
 
-type NavSection = 'compass' | 'briefing' | 'calendar' | 'tasks' | 'reminders' | 'meditation' | 'journal' | 'news';
+type NavSection = 'compass' | 'briefing' | 'calendar' | 'tasks' | 'reminders' | 'journal' | 'news';
 
 type Wisdom = { tradition: string; author: string; quote: string; source: string; dateStr: string };
 
 type Briefing = { summary: string; priorities: string[]; alerts: string[]; dateStr: string };
 type JournalEntry  = { date: string; gratitude: string; insight: string; prayer: string; meditationMin: number; savedAt: string };
-type MeditationSession = { id: string; date: string; minutes: number; completedAt: string };
 
 // ── Color tokens ───────────────────────────────────────────────────────────────
 const BG      = '#0d0d0d';
@@ -295,14 +294,6 @@ export default function DashboardPage() {
   const [briefingError, setBriefingError]         = useState<string | null>(null);
   const [briefingGenerated, setBriefingGenerated] = useState(false);
 
-  // Meditation
-  const [medRunning, setMedRunning]   = useState(false);
-  const [medSeconds, setMedSeconds]   = useState(0);
-  const [medTarget, setMedTarget]     = useState(120);
-  const [medSessions, setMedSessions] = useState<MeditationSession[]>([]);
-  const [medStreak, setMedStreak]     = useState(0);
-  const [medTotalMin, setMedTotalMin] = useState(0);
-
   // Journal
   const [journal, setJournal]                     = useState({ gratitude: '', insight: '', prayer: '', meditationMin: 0 });
   const [journalSaving, setJournalSaving]         = useState(false);
@@ -310,17 +301,15 @@ export default function DashboardPage() {
   const [journalHistory, setJournalHistory]       = useState<JournalEntry[]>([]);
   const [showJournalHistory, setShowJournalHistory] = useState(false);
 
-  const compassRef    = useRef<HTMLDivElement>(null);
-  const briefingRef   = useRef<HTMLDivElement>(null);
-  const calRef        = useRef<HTMLDivElement>(null);
-  const taskRef       = useRef<HTMLDivElement>(null);
-  const remRef        = useRef<HTMLDivElement>(null);
-  const meditationRef = useRef<HTMLDivElement>(null);
-  const journalRef    = useRef<HTMLDivElement>(null);
-  const newsRef       = useRef<HTMLDivElement>(null);
+  const compassRef   = useRef<HTMLDivElement>(null);
+  const briefingRef  = useRef<HTMLDivElement>(null);
+  const calRef       = useRef<HTMLDivElement>(null);
+  const taskRef      = useRef<HTMLDivElement>(null);
+  const remRef       = useRef<HTMLDivElement>(null);
+  const journalRef   = useRef<HTMLDivElement>(null);
+  const newsRef      = useRef<HTMLDivElement>(null);
   const loadedRef        = useRef(false);
   const lastFetchDateRef = useRef('');
-  const medIntervalRef   = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Fetchers ──────────────────────────────────────────────────────────────
   async function fetchBriefing() {
@@ -337,17 +326,6 @@ export default function DashboardPage() {
     } finally {
       setBriefingLoading(false);
     }
-  }
-
-  function fetchMeditationData() {
-    fetch('/api/meditation?days=30')
-      .then(r => r.json())
-      .then((d: { sessions?: MeditationSession[]; streak?: number; totalMin?: number }) => {
-        setMedSessions(d.sessions ?? []);
-        setMedStreak(d.streak ?? 0);
-        setMedTotalMin(d.totalMin ?? 0);
-      })
-      .catch(() => {});
   }
 
   function fetchJournalToday() {
@@ -371,35 +349,6 @@ export default function DashboardPage() {
       .then(r => r.json())
       .then((d: { entries?: JournalEntry[] }) => setJournalHistory(d.entries ?? []))
       .catch(() => {});
-  }
-
-  function startMeditation() {
-    if (medRunning) return;
-    setMedRunning(true);
-    medIntervalRef.current = setInterval(() => setMedSeconds(s => s + 1), 1000);
-  }
-
-  function stopMeditation() {
-    if (medIntervalRef.current) clearInterval(medIntervalRef.current);
-    setMedRunning(false);
-  }
-
-  async function completeMeditation() {
-    stopMeditation();
-    const minutes = Math.max(1, Math.round(medSeconds / 60));
-    try {
-      const res = await fetch('/api/meditation', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ minutes }),
-      });
-      const d = await res.json() as { ok: boolean; error?: string };
-      if (!d.ok) throw new Error(d.error);
-      setMedSeconds(0);
-      fetchMeditationData();
-    } catch (e: unknown) {
-      alert('保存失敗: ' + (e instanceof Error ? e.message : String(e)));
-    }
   }
 
   async function saveJournal() {
@@ -548,22 +497,18 @@ export default function DashboardPage() {
   }, []);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchMeditationData(); }, []);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchJournalToday(); }, []);
-  useEffect(() => () => { if (medIntervalRef.current) clearInterval(medIntervalRef.current); }, []);
 
   function navTo(section: NavSection) {
     setActiveNav(section);
     const refMap: Record<NavSection, React.RefObject<HTMLDivElement>> = {
-      compass:    compassRef,
-      briefing:   briefingRef,
-      calendar:   calRef,
-      tasks:      taskRef,
-      reminders:  remRef,
-      meditation: meditationRef,
-      journal:    journalRef,
-      news:       newsRef,
+      compass:   compassRef,
+      briefing:  briefingRef,
+      calendar:  calRef,
+      tasks:     taskRef,
+      reminders: remRef,
+      journal:   journalRef,
+      news:      newsRef,
     };
     refMap[section].current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -645,9 +590,8 @@ export default function DashboardPage() {
     { key: 'briefing',   icon: '🤖', label: 'ブリーフィング' },
     { key: 'calendar',   icon: '📅', label: 'カレンダー' },
     { key: 'tasks',      icon: '✅', label: 'タスク' },
-    { key: 'reminders',  icon: '🔔', label: 'リマインダー' },
-    { key: 'meditation', icon: '🧘', label: '瞑想' },
-    { key: 'journal',    icon: '📓', label: 'ジャーナル' },
+    { key: 'reminders', icon: '🔔', label: 'リマインダー' },
+    { key: 'journal',   icon: '📓', label: 'ジャーナル' },
     { key: 'news',       icon: '📰', label: 'ニュース' },
   ];
 
@@ -881,72 +825,6 @@ export default function DashboardPage() {
                     再生成
                   </button>
                 </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ── Meditation ───────────────────────────────────────────────── */}
-        <div ref={meditationRef} style={{ marginBottom: '3rem', scrollMarginTop: '1rem' }}>
-          <SectionHeader icon="🧘" title="瞑想タイマー" sub={`連続 ${medStreak} 日 / 今月合計 ${medTotalMin} 分`} />
-          <div style={cardStyle}>
-            {/* Timer display */}
-            <div style={{ textAlign: 'center', padding: '1.5rem 0 1rem' }}>
-              <div style={{
-                fontSize: '3.5rem', fontWeight: 200, letterSpacing: '-0.04em',
-                fontVariantNumeric: 'tabular-nums', color: medRunning ? '#10b981' : TEXT,
-                transition: 'color 0.3s',
-              }}>
-                {String(Math.floor(medSeconds / 60)).padStart(2, '0')}:{String(medSeconds % 60).padStart(2, '0')}
-              </div>
-              <div style={{ fontSize: '0.72rem', color: MUTED, marginTop: '0.25rem' }}>
-                目標: {Math.floor(medTarget / 60)}分
-                {medRunning && medSeconds >= medTarget && ' ✓ 達成！'}
-              </div>
-              {/* Target selector */}
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}>
-                {[60, 120, 300, 600, 1200].map(sec => (
-                  <button
-                    key={sec}
-                    onClick={() => setMedTarget(sec)}
-                    style={{
-                      padding: '3px 12px', borderRadius: 20, fontSize: '0.72rem', cursor: 'pointer', fontFamily: 'inherit',
-                      border: `1px solid ${medTarget === sec ? '#10b981' : BORDER}`,
-                      background: medTarget === sec ? '#10b98120' : 'transparent',
-                      color: medTarget === sec ? '#10b981' : MUTED,
-                    }}
-                  >
-                    {Math.floor(sec / 60)}分
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Controls */}
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
-              {!medRunning ? (
-                <button onClick={startMeditation} style={btnStyle('#10b981', false)}>▶ 開始</button>
-              ) : (
-                <button onClick={stopMeditation} style={btnStyle('#6b7280', false)}>⏸ 一時停止</button>
-              )}
-              {medSeconds > 0 && (
-                <button onClick={completeMeditation} style={btnStyle(ACCENT, false)}>✓ 完了・保存</button>
-              )}
-              {medSeconds > 0 && !medRunning && (
-                <button onClick={() => setMedSeconds(0)} style={{ ...btnStyle('#374151', false), fontSize: '0.75rem' }}>リセット</button>
-              )}
-            </div>
-
-            {/* Recent sessions */}
-            {medSessions.length > 0 && (
-              <div style={{ borderTop: `1px solid ${BORDER}`, paddingTop: '1rem' }}>
-                <div style={{ fontSize: '0.72rem', color: MUTED, marginBottom: '0.5rem' }}>最近の記録</div>
-                {medSessions.slice(-5).reverse().map(s => (
-                  <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.3rem 0', fontSize: '0.8rem', borderBottom: `1px solid ${BORDER}` }}>
-                    <span style={{ color: MUTED }}>{s.date}</span>
-                    <span style={{ color: TEXT, fontWeight: 500 }}>{s.minutes} 分</span>
-                  </div>
-                ))}
               </div>
             )}
           </div>

@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
 
+// Vercel caches GET route handlers statically by default; force dynamic so the
+// date and day-index are evaluated fresh on every request.
+export const dynamic = 'force-dynamic';
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 type WisdomCategory =
   | '聖書'

@@ -91,6 +91,17 @@ const FEED_META: Record<string, { label: string; group: NewsGroup }> = {
   cnbc:     { label: 'CNBC',      group: 'economy' },
 };
 
+const HUB_BASE = 'https://globish-hub.vercel.app';
+
+const PROSPECT_ITEMS = [
+  { icon: '🦷', label: '歯科プロスペクト', brand: 'dental' },
+  { icon: '💄', label: '美容プロスペクト', brand: 'beauty' },
+  { icon: '🖐️', label: 'Touchプロスペクト', brand: 'touch' },
+  { icon: '📚', label: 'Manabiプロスペクト', brand: 'manabi' },
+  { icon: '🛡️', label: 'Hokenプロスペクト', brand: 'hoken' },
+  { icon: '🐾', label: 'Petプロスペクト', brand: 'pet' },
+] as const;
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 const HEALTH_RE = /病院|歯科|デンタル|クリニック|検診|健診|ジム|ランニング|筋トレ|治療|診察|カウンセリング|マッサージ|整体/i;
 const PERSONAL_RE = /プライベート|家族|旅行|買い物|ショッピング|映画|友人|休み|休暇|デート|習い事|美容|ヘアサロン|散髪/i;
@@ -691,10 +702,67 @@ export default function DashboardPage() {
             </button>
           ))}
         </div>
+
+        {/* Prospects */}
+        <div style={{ marginTop: '0.5rem', borderTop: `1px solid ${BORDER}`, paddingTop: '0.75rem' }}>
+          <div style={{ fontSize: '0.58rem', color: MUTED, textTransform: 'uppercase', letterSpacing: '0.1em', padding: '0 0.5rem', marginBottom: '0.4rem' }}>
+            📊 プロスペクト管理
+          </div>
+          {PROSPECT_ITEMS.map(({ icon, label, brand }) => (
+            <a
+              key={brand}
+              href={`${HUB_BASE}/prospects/${brand}`}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '0.6rem',
+                padding: '0.5rem 0.75rem', borderRadius: 8, marginBottom: 2,
+                textDecoration: 'none', cursor: 'pointer',
+                fontFamily: 'inherit', fontSize: '0.8rem',
+                color: MUTED, transition: 'background 0.12s, color 0.12s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.color = '#C9A84C'; e.currentTarget.style.background = 'rgba(201,168,76,0.08)'; }}
+              onMouseLeave={e => { e.currentTarget.style.color = MUTED; e.currentTarget.style.background = 'transparent'; }}
+            >
+              <span style={{ fontSize: '0.85rem', flexShrink: 0 }}>{icon}</span>
+              {label}
+            </a>
+          ))}
+        </div>
       </aside>
 
       {/* ── Main ─────────────────────────────────────────────────────────── */}
       <main style={{ flex: 1, overflowY: 'auto', padding: '2rem 2.5rem', minWidth: 0 }}>
+
+        {/* ── Prospects ────────────────────────────────────────────────── */}
+        <div style={{ marginBottom: '3rem' }}>
+          <div style={{ marginBottom: '1rem' }}>
+            <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 600, color: TEXT, letterSpacing: '-0.02em' }}>
+              📊 プロスペクト管理
+            </h2>
+            <p style={{ margin: '0.25rem 0 0', fontSize: '0.73rem', color: MUTED }}>各ブランドのプロスペクト収集・メール送信</p>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem' }}>
+            {PROSPECT_ITEMS.map(({ icon, label, brand }) => (
+              <a
+                key={brand}
+                href={`${HUB_BASE}/prospects/${brand}`}
+                style={{
+                  ...cardStyle,
+                  textDecoration: 'none',
+                  display: 'flex', alignItems: 'center', gap: '0.75rem',
+                  transition: 'border-color 0.15s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(201,168,76,0.4)'; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = BORDER; }}
+              >
+                <span style={{ fontSize: '1.5rem' }}>{icon}</span>
+                <div>
+                  <div style={{ fontSize: '0.875rem', color: TEXT, fontWeight: 500 }}>{label}</div>
+                  <div style={{ fontSize: '0.7rem', color: MUTED, marginTop: 2 }}>プロスペクト管理 →</div>
+                </div>
+              </a>
+            ))}
+          </div>
+        </div>
 
         {/* ── Compass ──────────────────────────────────────────────────── */}
         <div ref={compassRef} style={{ marginBottom: '3rem', scrollMarginTop: '1rem' }}>
